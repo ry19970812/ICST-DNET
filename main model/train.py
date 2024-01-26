@@ -30,18 +30,16 @@ def train_loop(dataloader, model, loss_fn, optimizer):
     num_loss = []
     size = len(dataloader.dataset)
     # print(f"size:{size}") # size-一个dataset中sample总数量 9592
-    for batch, (X_ST_input, X_closeness, X_day, X_week, TE_input, X_output, X_CD) in enumerate(dataloader):
+    for batch, (X_ST_input, TE_input, X_output, X_CD) in enumerate(dataloader):
         # 计算损失以及预测
         X_ST_input = X_ST_input.to(device)
-        X_closeness = X_closeness.to(device)
-        X_day = X_day.to(device)
-        X_week = X_week.to(device)
         TE_input = TE_input.to(device)
+        SE_train_input = SE_train_input.to(device)
         X_output = X_output.to(device)
         X_CD = X_CD.to(device)
         # print(X_output.shape) # shape torch.Size([128, 5, 1])
         # print(X_TE.shape) # shape torch.Size([128, 12])
-        final_output, Y_output = model(X_ST_input, X_closeness, X_day, X_week, TE_input, SE_train_input, X_output, X_CD)
+        final_output, Y_output = model(X_ST_input, TE_input, SE_train_input, X_output, X_CD)
         # print('final_output:', final_output.shape)
         label = Y_output
         # print('final_output:', final_output.shape)
