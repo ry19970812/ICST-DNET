@@ -24,7 +24,7 @@ class the_main_model(nn.Module):
 
         self.ST_Traffic = SFPR()
 
-        self.CGL = STCL_module()
+        self.STCL = STCL_module()
 
         self.ST_module_weight = nn.Parameter(torch.empty(1).normal_(mean=0.5, std=0.5))
 
