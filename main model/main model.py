@@ -42,7 +42,6 @@ class the_main_model(nn.Module):
         # print(X_STCL_output.shape) # shape torch.Size([128, 12, 108])
 
         # # prediction layer
-        X_output = self.ST_module_weight * X_ST_output + self.IT_module_weight * X_IT_output
         X_output = self.ST_module_weight * X_ST_output + (1-self.ST_module_weight) * X_STCL_output
         return X_output, Y_output
 
