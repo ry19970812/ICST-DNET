@@ -157,74 +157,6 @@ class spatialAttention(nn.Module):
         return X
 
 
-class temporalAttention(nn.Module):
-    '''
-    temporal attention mechanism
-    X:      [batch_size, num_step, num_vertex, D]
-    STE:    [batch_size, num_step, num_vertex, D]
-    K:      number of attention heads
-    d:      dimension of each attention outputs
-    return: [batch_size, num_step, num_vertex, D]
-    '''
-
-    def __init__(self, K=K, d=d, bn_decay=bn_decay, mask=True):
-        super(temporalAttention, self).__init__()
-        D = K * d
-        self.d = d
-        self.K = K
-        self.mask = mask
-        self.FC_q = FC(input_dims=1 * D, units=D, activations=F.relu,
-                       bn_decay=bn_decay)
-        self.FC_k = FC(input_dims=1 * D, units=D, activations=F.relu,
-                       bn_decay=bn_decay)
-        self.FC_v = FC(input_dims=1 * D, units=D, activations=F.relu,
-                       bn_decay=bn_decay)
-        self.FC = FC(input_dims=D, units=D, activations=F.relu,
-                     bn_decay=bn_decay)
-
-    def forward(self, X):
-        batch_size_ = X.shape[0]
-        # X = torch.cat((X, STE), dim=-1)
-        # [batch_size, num_step, num_vertex, K * d]
-        query = self.FC_q(X)
-        key = self.FC_k(X)
-        value = self.FC_v(X)
-        # [K * batch_size, num_step, num_vertex, d]
-        query = torch.cat(torch.split(query, self.K, dim=-1), dim=0)
-        key = torch.cat(torch.split(key, self.K, dim=-1), dim=0)
-        value = torch.cat(torch.split(value, self.K, dim=-1), dim=0)
-        # query: [K * batch_size, num_vertex, num_step, d]
-        # key:   [K * batch_size, num_vertex, d, num_step]
-        # value: [K * batch_size, num_vertex, num_step, d]
-        query = query.permute(0, 2, 1, 3)
-        key = key.permute(0, 2, 3, 1)
-        value = value.permute(0, 2, 1, 3)
-        # [K * batch_size, num_vertex, num_step, num_step]
-        attention = torch.matmul(query, key)
-        attention /= (self.d ** 0.5)
-        # mask attention score
-        if self.mask:
-            batch_size = X.shape[0]
-            num_step = X.shape[1]
-            num_vertex = X.shape[2]
-            mask = torch.ones(num_step, num_step)
-            mask = torch.tril(mask)
-            mask = torch.unsqueeze(torch.unsqueeze(mask, dim=0), dim=0)
-            mask = mask.repeat(self.K * batch_size, num_vertex, 1, 1)
-            mask = mask.to(torch.bool)
-            attention = torch.where(mask, attention, -2 ** 15 + 1)
-        # softmax
-        attention = F.softmax(attention, dim=-1)
-        # [batch_size, num_step, num_vertex, D]
-        X = torch.matmul(attention, value)
-        X = X.permute(0, 2, 1, 3)
-        X = torch.cat(torch.split(X, batch_size_, dim=0), dim=-1)  # orginal K, change to batch_size
-        X = self.FC(X)
-        del query, key, value, attention
-        return X
-
-
-
 class gatedFusion(nn.Module):
     '''
     gated fusion
@@ -265,27 +197,7 @@ class gatedFusion(nn.Module):
 
 
 
-
-
-
-# class STAttBlock(nn.Module):
-#     def __init__(self, K=K, d=d, bn_decay=bn_decay, mask=False):
-#         super(STAttBlock, self).__init__()
-#         self.spatialAttention = spatialAttention(K, d, bn_decay)
-#         self.temporalAttention = temporalAttention(K, d, bn_decay, mask=mask)
-#         self.gatedFusion = gatedFusion(K * d, bn_decay)
-#
-#     def forward(self, X, STE):
-#         HS = self.spatialAttention(X, STE)
-#         HT = self.temporalAttention(X, STE)
-#         H = self.gatedFusion(HS, HT)
-#         # del HS, HT
-#         return torch.add(X, H)
-
-
-
-
-class transformAttention(nn.Module):
+class similarAttentionAttention(nn.Module):
     '''
     transform attention mechanism
     X:        [batch_size, num_his, num_vertex, D]
@@ -310,11 +222,11 @@ class transformAttention(nn.Module):
         self.FC = FC(input_dims=D, units=D, activations=F.relu,
                      bn_decay=bn_decay)
 
-    def forward(self, X, STE_pred):
+    def forward(self, X, STE_pred, STE_his):
         batch_size = X.shape[0]
         # [batch_size, num_step, num_vertex, K * d]
         query = self.FC_q(STE_pred)
-        key = self.FC_k(X)
+        key = self.FC_k(STE_his)
         value = self.FC_v(X)
         # [K * batch_size, num_step, num_vertex, d]
         query = torch.cat(torch.split(query, self.K, dim=-1), dim=0)
@@ -356,7 +268,7 @@ class SFPR(nn.Module):
                        bn_decay=bn_decay)
         self.FC_2 = FC(input_dims=[D, D], units=[D, 1], activations=[F.relu, None],
                        bn_decay=bn_decay)
-        self.transformAttention = transformAttention()
+        self.transformAttention = similarAttention()
 
         # self.nonlinear = nn.Linear(the_whole_sensor, 1)
 
@@ -399,31 +311,21 @@ class SFPR(nn.Module):
         # print(temporal_output.shape) # shape torch.Size([64, 10, 207, 8])
 
         ST_Fusion = self.gatedFusion(spatial_output, temporal_output)
-        # print(ST_Fusion.shape) # shape torch.size[64, 10, 207, 8]
-        # # Pred_STE = self.Pred_STE_embedding(X_input_future_TE, X_input_future_SE)
-        #
-        TransAtt_output = self.transformAttention(ST_Fusion, Pred_STE)
-        # print(TransAtt_output.shape) # shape torch.Size([64, 1, 207, 8])
+        Pred_STE = self.Pred_STE_embedding(X_input_future_TE, X_input_future_SE)
+        TransAtt_output = self.similarAttention(ST_Fusion, Pred_STE, His_STE)
         TransAtt_output = self.FC_2(TransAtt_output)
         TransAtt_output = TransAtt_output.contiguous().view(TransAtt_output.shape[0], TransAtt_output.shape[1], TransAtt_output.shape[2] * TransAtt_output.shape[3])
-        # print(TransAtt_output.shape) # shape torch.Size([64, 207])
-        # Decoder_ST_Residual = []
-        # Decoder_ST_Single_Residual = self.ST_Att(TransAtt_output, Pred_STE)
-        # Decoder_ST_Residual.append(Decoder_ST_Single_Residual)
-        # for j in range(num_ST_Residual_Decoder):
-        #     Decoder_ST_Single_Residual = self.ST_Att(Decoder_ST_Residual[j], Pred_STE)
-        #     Decoder_ST_Residual.append(Decoder_ST_Single_Residual)
-        #
-        # decoder_output = Decoder_ST_Residual[num_ST_Residual_Decoder]
-        # decoder_output = self.FC_2(decoder_output)
-        # decoder_output = decoder_output.view(decoder_output.shape[0], decoder_output.shape[1] * decoder_output.shape[2] * decoder_output.shape[3])
-        # #
-        # print(decoder_output.shape) # shape torch.Size([128, 29])
-        # # decoder_output = self.FC_2(decoder_output)
-        # # # print(decoder_output.shape)
-        # #
-        # # final_output = decoder_output.view(-1, decoder_output.shape[1] * decoder_output.shape[2] * decoder_output.shape[3])
-        # #
-        # # final_output = self.nonlinear(final_output)
-        # # print(final_output.shape)
-        return TransAtt_output
+        Decoder_ST_Residual = []
+        Decoder_ST_Single_Residual = self.ST_Att(TransAtt_output, Pred_STE)
+        Decoder_ST_Residual.append(Decoder_ST_Single_Residual)
+        for j in range(num_ST_Residual_Decoder):
+            Decoder_ST_Single_Residual = self.ST_Att(Decoder_ST_Residual[j], Pred_STE)
+            Decoder_ST_Residual.append(Decoder_ST_Single_Residual)
+        
+        decoder_output = Decoder_ST_Residual[num_ST_Residual_Decoder]
+        decoder_output = self.FC_2(decoder_output)
+        decoder_output = decoder_output.view(decoder_output.shape[0], decoder_output.shape[1] * decoder_output.shape[2] * decoder_output.shape[3])
+        decoder_output = self.FC_2(decoder_output)
+        final_output = decoder_output.view(-1, decoder_output.shape[1] * decoder_output.shape[2] * decoder_output.shape[3])
+        final_output = self.nonlinear(final_output)
+        return final_output
