@@ -37,6 +37,49 @@ class FC(nn.Module):
             x = conv(x)
         return x
 
+class STEmbedding(nn.Module):
+    '''
+    spatio-temporal embedding
+    SE:     [num_vertex, D]
+    TE:     [batch_size, num_his + num_pred, 2] (dayofweek, timeofday)
+    T:      num of time steps in one day
+    D:      output dims
+    retrun: [batch_size, num_his + num_pred, num_vertex, D]
+    '''
+
+    def __init__(self, D=D, bn_decay=bn_decay):
+        super(STEmbedding, self).__init__()
+        self.FC_se = FC(
+            input_dims=[SE_initial_dimension, D], units=[D, D], activations=[F.relu, None],
+            bn_decay=bn_decay)
+
+        self.FC_te = FC(
+            input_dims=[295, D], units=[D, D], activations=[F.relu, None],
+            bn_decay=bn_decay)  # input_dims = time step per day + days per week=288+7=295
+
+    def forward(self, SE, TE, T=288):
+        # spatial embedding
+        SE = SE.unsqueeze(0).unsqueeze(0).to(device)
+        # print(SE.shape)
+        SE = self.FC_se(SE)
+        # print(SE.shape)
+        # # # temporal embedding
+        dayofweek = torch.empty(TE.shape[0], TE.shape[1], 7)
+        timeofday = torch.empty(TE.shape[0], TE.shape[1], T)
+        for i in range(TE.shape[0]):
+            dayofweek[i] = F.one_hot(TE[..., 0][i].to(torch.int64) % 7, 7)
+        for j in range(TE.shape[0]):
+            timeofday[j] = F.one_hot(TE[..., 1][j].to(torch.int64) % 288, T)
+        TE = torch.cat((dayofweek, timeofday), dim=-1)
+        TE = TE.unsqueeze(dim=2)
+        TE = torch.FloatTensor(TE).to(device)
+        # print(TE.shape)
+        TE = self.FC_te(TE)
+        # print(TE.shape)
+        del dayofweek, timeofday
+        return SE + TE
+
+
 
 class spatialAttention(nn.Module):
     '''
