@@ -32,7 +32,7 @@ class the_main_model(nn.Module):
 
         SE_input = torch.squeeze(SE_input, dim=0)
 
-        # ST module
+        # SFPR module
         X_ST_output = self.ST_Traffic(ST_input, SE_input, TE_input)
 
         # # STCL module
